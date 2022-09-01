@@ -27,6 +27,7 @@
 ##'   \dQuote{Euclid} and \dQuote{Angle}.
 ##' @param n.cluster Number of clusters to calculate.
 ##' @param plot Should a plot be produced?
+##' @param showplot logical TRUE/FALSE. Should the plot object be shown?
 ##' @param type \code{type} determines how the data are split i.e.
 ##'   conditioned, and then plotted. The default is will produce a
 ##'   single plot using the entire data. Type can be one of the
@@ -113,7 +114,7 @@
 ##' traj <- trajCluster(traj, method = "Angle", type = "season", n.cluster = 4)
 ##' }
 trajCluster <- function(traj, method = "Euclid", n.cluster = 5,
-                        plot = TRUE, type = "default",
+                        plot = TRUE, showplot = FALSE, type = "default",
                         cols = "Set1", split.after = FALSE, map.fill = TRUE,
                         map.cols = "grey40", map.alpha = 0.4,
                         projection = "lambert",
@@ -131,19 +132,19 @@ trajCluster <- function(traj, method = "Euclid", n.cluster = 5,
 
   # remove any missing lat/lon
   traj <- filter(traj, !is.na(lat), !is.na(lon))
-  
+
   # check to see if all back trajectories are the same length
-  traj <- group_by(traj, date) %>% 
+  traj <- group_by(traj, date) %>%
     mutate(traj_len = length(date))
-  
+
   if (length(unique(traj$traj_len)) > 1) {
     warning("Trajectory lengths differ, using most common length.")
     ux <- unique(traj$traj_len)
     nmax <- ux[which.max(tabulate(match(traj$traj_len, ux)))]
-    traj <- ungroup(traj) %>% 
+    traj <- ungroup(traj) %>%
       filter(traj_len == nmax)
   }
-  
+
   Args <- list(...)
 
   ## set graphics
@@ -152,7 +153,7 @@ trajCluster <- function(traj, method = "Euclid", n.cluster = 5,
 
   ## reset graphic parameters
   on.exit(trellis.par.set(
-     
+
     fontsize = current.font
   ))
 
@@ -221,7 +222,7 @@ trajCluster <- function(traj, method = "Euclid", n.cluster = 5,
   } else {
     traj <- cutData(traj, type)
 
-    traj <- traj %>% 
+    traj <- traj %>%
       group_by(across(type)) %>%
       do(calcTraj(.))
   }
@@ -254,14 +255,14 @@ trajCluster <- function(traj, method = "Euclid", n.cluster = 5,
 
     vars <- c(type, "cluster")
 
-    clusters <- traj %>% 
+    clusters <- traj %>%
       group_by(across(vars)) %>%
       tally() %>%
       mutate(freq = round(100 * n / sum(n), 1))
 
     ## make each panel add up to 100
     if (by.type) {
-      clusters <- clusters %>% 
+      clusters <- clusters %>%
         group_by(across(type)) %>%
         mutate(freq = 100 * freq / sum(freq))
 
@@ -313,8 +314,9 @@ trajCluster <- function(traj, method = "Euclid", n.cluster = 5,
     plot.args <- listUpdate(plot.args, Args)
 
     ## plot
-    plt <- do.call(scatterPlot, plot.args)
-    
+    if(isTRUE(showplot)){
+      plt <- do.call(scatterPlot, plot.args)
+    }
     ## create output with plot
     output <- list(plot = plt, data = list(traj = traj, results = resRtn), call = match.call())
     class(output) <- "openair"
