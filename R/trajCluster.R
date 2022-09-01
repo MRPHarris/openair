@@ -316,11 +316,14 @@ trajCluster <- function(traj, method = "Euclid", n.cluster = 5,
     ## plot
     if(isTRUE(showplot)){
       plt <- do.call(scatterPlot, plot.args)
+      output <- list(plot = plt, data = list(traj = traj, results = resRtn), call = match.call())
+      class(output) <- "openair"
+      invisible(output)
+    } else {
+      output <- list(data = list(traj = traj, results = resRtn), call = match.call())
+      class(output) <- "openair"
+      invisible(output)
     }
-    ## create output with plot
-    output <- list(plot = plt, data = list(traj = traj, results = resRtn), call = match.call())
-    class(output) <- "openair"
-    invisible(output)
   } else {
     ## create output without plot
     return(traj)
