@@ -1,4 +1,4 @@
-##' Calculate clusters for back tracectories
+##' Calculate clusters for back trajectories
 ##'
 ##' This function carries out cluster analysis of HYSPLIT back
 ##' trajectories. The function is specifically designed to work with

@@ -2,13 +2,14 @@
 % Please edit documentation in R/trajCluster.R
 \name{trajCluster}
 \alias{trajCluster}
-\title{Calculate clusters for back tracectories}
+\title{Calculate clusters for back trajectories}
 \usage{
 trajCluster(
   traj,
   method = "Euclid",
   n.cluster = 5,
   plot = TRUE,
+  showplot = FALSE,
   type = "default",
   cols = "Set1",
   split.after = FALSE,
@@ -34,6 +35,8 @@ back trajectories. There are two methods available:
 \item{n.cluster}{Number of clusters to calculate.}
 
 \item{plot}{Should a plot be produced?}
+
+\item{showplot}{logical TRUE/FALSE. Should the plot object be shown?}
 
 \item{type}{\code{type} determines how the data are split i.e.
 conditioned, and then plotted. The default is will produce a

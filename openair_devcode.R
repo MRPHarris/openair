@@ -41,6 +41,413 @@ clus1 <- openair::trajCluster(traj = PH_GDAS1_100m_120hr_2010,
                      n.cluster = 2,
                      plot = TRUE, showplot = FALSE)
 
+## Calculating intra-cluster spatial variance (SV):
+add_traj_identifier <- function(x, ntraj_1 = TRUE){
+  # This function assumes that convert_openair() has been used on the dataset.
+  if(!is.data.frame(x)){
+    x <- as.data.frame(x)
+  }
+  # Compute trajectory number. Starts at 1.
+  if(!isTRUE(ntraj_1)){
+    x$start.time.minutes <- substr(x[,12],12,19)
+    x$start.time.minutes <- 60*24*as.numeric(chron::times(x$start.time.minutes))
+    x$trajectory <- cumsum(c(0, as.numeric(diff(x$start.time.minutes)) != 0)) + 1
+  } else {
+    if(sign(x$hour.inc[1]) == -1){
+      x$diffs <- 1
+      x$diffs[2:nrow(x)] <- diff(x$hour.inc)
+      x$trajectory <- cumsum(c(0, as.numeric(x$diffs[2:nrow(x)]) != 1)) + 1
+    } else {
+      x$diffs <- 1
+      x$diffs[2:nrow(x)] <- diff(x$hour.inc)
+      x$trajectory <- cumsum(c(0,as.numeric(x$diffs[2:nrow(x)]) != -1 )) + 1
+    }
+
+  }
+  #  x_new <<- as.data.frame(x)
+  x
+  #  rm(x_new, envir = parent.frame())
+}
+
+
+## Extract points for a single cluster.
+clus1_pts <- clus1$data$traj %>%
+  dplyr::filter(cluster == "C1") %>%
+  add_traj_identifier()
+clus1_mean <- clus1$data$results %>%
+  dplyr::filter(cluster == "C1") %>%
+  arrange(hour.inc)
+
+## Now calculate variance
+# Each trajectory j gets an SV val.
+
+traj <- PH_GDAS1_100m_120hr_2010 %>%
+  add_traj_identifier()
+length(unique(test$trajectory))
+
+j = 1
+
+clust_ntraj = max(clus1_pts$trajectory, na.rm = T)
+
+trajCluster_TSV <- function(traj,
+                            verbose = T,
+                            nclusters = 5,
+                            normalise = T){
+  TSVlist <- vector('list',length = length(nclusters))
+  for(clus in seq_along(TSVlist)){
+    if(isTRUE(verbose)){message("Starting calculations for ",nclusters[clus]," clusters.")}
+    clus_it <- trajCluster(traj = traj,
+                           n.cluster = nclusters[clus],
+                           plot = TRUE, showplot = FALSE)
+    TSVlist[[clus]] <- cluster_TSV(cluster_res = clus_it,
+                          output = 'TSV',
+                          verbose = FALSE)
+    if(isTRUE(verbose)){message("Calculations complete for ",nclusters[clus]," clusters.")}
+  }
+  TSVvals <- unlist(TSVlist) %>%
+    data.frame() %>%
+    mutate(clusters = nclusters) %>%
+    'colnames<-'(c('TSV','clusters')) %>%
+    dplyr::relocate(clusters) %>%
+    mutate(indexc = row_number())
+  if(isTRUE(normalise)){
+    maxTSV <- max(TSVvals$TSV, na.rm = T)
+    TSVvals <- TSVvals %>%
+      mutate(TSV = TSV/maxTSV)
+  }
+  TSVvals
+}
+
+
+
+PH_GDAS_2010_TSV <- trajCluster_TSV(traj = PH_GDAS1_100m_120hr_2010,
+                                    nclusters = seq(2,30,1))
+
+PH_GDAS_2010_TSV_5rpt <- trajCluster_TSV(traj = PH_GDAS1_100m_120hr_2010,
+                                    nclusters = rep(5,20))
+
+plot_cluster_TSV <- function(TSVres){
+  plotobj <- ggplot() +
+    geom_line(data = testTSV, aes(x = clusters, y = TSV)) +
+    geom_point(data = testTSV, aes(x = clusters, y = TSV)) +
+    theme_cowplot(12)
+
+
+
+}
+
+savedir <- 'C:/Users/matth/Desktop/University Files/mh phd 2020/3 thesis/Chapter X Contemporary transport dynamics/trajectory data/TSV calculations/'
+
+saveRDS(PH_GDAS_2010_TSV_5rpt, file = paste0(savedir,"PH_GDAS_2010_100m_TSV_5rpt.rds"))
+
+library(cowplot)
+
+ggplot() +
+  geom_line(data = PH_GDAS_2010_TSV_5rpt, aes(x = indexc, y = TSV)) +
+  geom_point(data = PH_GDAS_2010_TSV_5rpt, aes(x = indexc, y = TSV)) +
+  theme_cowplot(12)
+
+
+
+
+
+cluster_TSV <- function(cluster_res,
+                        output = 'TSV',
+                        cluster_sp = NULL,
+                        verbose = FALSE){
+  ## Check for existence of trajectory identifier column
+  if('trajectory' %in% colnames(cluster_res$data$traj)){
+    cluster_res$data$traj <- cluster_res$data$traj %>%
+      dplyr::select(-c(trajectory))
+  }
+  ## Two options:
+  # TSV across all clusters, or CSV of an individual cluster.
+  if(is.null(cluster_sp)){
+    # Get n clusters and names of clusters
+    clusters <- unique(cluster_res$data$results$cluster)
+    nclusters <- length(clusters)
+    # Init list for cluster iterations
+    CSVlist <- vector('list',length = nclusters)
+    for(i in seq_along(CSVlist)){
+      if(isTRUE(verbose)){message("Calculating CSV for ",clusters[i])}
+      # obtain endpoints for this cluster
+      clus_it_pts <- cluster_res$data$traj %>%
+        dplyr::filter(cluster == clusters[i]) %>%
+        add_traj_identifier()
+      # Obtain cluster mean points
+      clus_it_mean <- cluster_res$data$results %>%
+        dplyr::filter(cluster == clusters[i]) %>%
+        arrange(hour.inc)
+      # How many trajectories in this cluster?
+      clust_ntraj = max(clus_it_pts$trajectory, na.rm = T)
+      traj_list <- vector('list',length = clust_ntraj)
+      for(j in seq_along(traj_list)){
+        # For each trajectory, obtain the haversine distance between each endpoint and the corresponding cluster mean point
+        endpt_it <- clus_it_pts %>%
+          dplyr::filter(trajectory == j) %>%
+          mutate(clusmeanpt_lat = clus_it_mean$lat) %>%
+          mutate(clusmeanpt_lon = clus_it_mean$lon) %>%
+          mutate(SV = spatialrisk::haversine(lat_from = lat,
+                                             lon_from = lon,
+                                             lat_to = clusmeanpt_lat,
+                                             lon_to = clusmeanpt_lon))
+        # obtain Spatial Variance SV for this trajectory
+        traj_list[[j]] <- sum(endpt_it$SV)
+      }
+      # Sum SV for each trajectory to obtain Cluster Spatial Variance CSV
+      CSVlist[[i]] <- sum(unlist(traj_list), na.rm = T)
+      if(isTRUE(verbose)){message("Cluster ",i," complete. CSV: ",CSVlist[[i]])}
+    }
+    # Sum CSV for each cluster to obtain Total Spatial Variance TSV for this n clusters
+    TSV <- sum(unlist(CSVlist), na.rm = T)
+    if(isTRUE(verbose)){message("TSV: ",TSV)}
+    if(output == 'TSV'){
+      return(TSV)
+    } else if(output == 'CSV'){
+      names(CSVlist) <- clusters
+      return(CSVlist)
+    }
+  } else {
+    ## Individual cluster.
+    if(length(cluster_sp) > 1){
+      stop("Only a single cluster_sp is supported at this stage.")
+    }
+    if(isTRUE(verbose)){message("Calculating CSV for ",clusters[i])}
+    # obtain endpoints for this cluster
+    clus_it_pts <- cluster_res$data$traj %>%
+      dplyr::filter(cluster == cluster_sp) %>%
+      add_traj_identifier()
+    # Obtain cluster mean points
+    clus_it_mean <- cluster_res$data$results %>%
+      dplyr::filter(cluster == cluster_sp) %>%
+      arrange(hour.inc)
+    # How many trajectories in this cluster?
+    clust_ntraj = max(clus_it_pts$trajectory, na.rm = T)
+    traj_list <- vector('list',length = clust_ntraj)
+    for(j in seq_along(traj_list)){
+      # For each trajectory, obtain the haversine distance between each endpoint and the corresponding cluster mean point
+      endpt_it <- clus_it_pts %>%
+        dplyr::filter(trajectory == j) %>%
+        mutate(clusmeanpt_lat = clus_it_mean$lat) %>%
+        mutate(clusmeanpt_lon = clus_it_mean$lon) %>%
+        mutate(SV = spatialrisk::haversine(lat_from = lat,
+                                           lon_from = lon,
+                                           lat_to = clusmeanpt_lat,
+                                           lon_to = clusmeanpt_lon))
+      # obtain Spatial Variance SV for this trajectory
+      traj_list[[j]] <- sum(endpt_it$SV)
+    }
+    CSV <- sum(unlist(traj_list), na.rm = T)
+    return(CSV)
+  }
+}
+
+
+
+
+Clusters_TSV <- function(traj,
+                       verbose = T){
+  # This function generates the total spatial variance of a given cluster.
+
+
+}
+
+
+## Generate clusters
+Cluster_SV <- function(traj,
+                       verbose = T,
+                       nclust = 'ntraj'){
+  if('trajectory' %in% colnames(traj)){
+    traj <- traj %>%
+      dplyr::select(-c(trajectory)) %>%
+      add_traj_identifier()
+  } else {
+    traj <- traj %>%
+      add_traj_identifier()
+  }
+  # total_clusters =
+  if(nclust == 'ntraj'){
+    nclusts = max(traj$trajectory, na.rm = T)
+    carry_list <- vector('list', length = 2)
+  } else {
+    nclusts = nclust
+  }
+  TSV_list <- vector('list', length = nclusts - 1)
+  for(cl in seq_along(TSV_list)){
+    # following the HYPSLIT guidance.
+    # iterations add additional clusters. i = n clusters. At each cluster step, total variance is calculated.
+    # But TSV is only calculated for each merge. Thus, we need to know where each trajectory merge occurs.
+    if(nclust == 'ntraj'){
+
+      ## For each iteration, determine CSV of new additions.
+      if(cl == 1){
+        # Generate data as normal.
+        clust_it <- trajCluster(traj,
+                                n.cluster = ((nclusts-1) - (cl - 1)),
+                                plot = TRUE,
+                                showplot = FALSE)
+        clustlist_it <- unique(clust_it$data$traj$cluster)
+        clustdat <- clust_it$data$traj %>%
+          add_traj_identifier() %>%
+          group_by(cluster) %>%
+          distinct(trajectory)
+        carry_list[[1]] <- clustdat
+        TSV_list[[cl]] <- cluster_TSV(clust_it, verbose = F)
+      } else {
+        # Generate data as normal.
+        clust_it <- trajCluster(traj,
+                                n.cluster = ((nclusts-1) - (cl - 1)),
+                                plot = TRUE,
+                                showplot = FALSE)
+        clustlist_it <- unique(clust_it$data$traj$cluster)
+        clustdat <- clust_it$data$traj %>%
+          add_traj_identifier() %>%
+          group_by(cluster) %>%
+          distinct(trajectory)
+        # carry_list[[1]] <- clustdat
+        # Get u
+
+        test <- clustdat %>%
+          count() %>%
+          arrange(desc(n))
+
+        test2 <- carry_list[[1]] %>%
+          count() %>%
+          arrange(desc(n)) %>%
+          head(-1)
+
+        clusterdiff <- test$cluster[which(test$n != test2$n)]
+
+        compdat <- carry_list[[1]]
+        compvals <- compdat %in% clustdat
+        TSV_list[[cl]] <- cluster_TSV(clust_it, verbose = F)
+
+
+
+      }
+
+      cluster_1st <- 365
+      cluster_2nd <- 364
+
+
+
+      tnum <- max(clus1_pts$trajectory, na.rm = T)
+      clust_it <- trajCluster(traj,
+                              n.cluster = tnum - (cl - 1),
+                              plot = TRUE,
+                              showplot = FALSE)
+      clustlist_it <- unique(clust_it$data$traj$cluster)
+      clustdat <- clust_it$data$traj %>%
+        add_traj_identifier() %>%
+        group_by(cluster) %>%
+        distinct(trajectory)
+
+
+
+
+
+    } else {
+      clust_it <- trajCluster(traj,
+                              n.cluster = nclusts[cl],
+                              plot = TRUE,
+                              showplot = FALSE)
+    }
+    TSV_list[[cl]] <- cluster_TSV(clust_it, verbose = F)
+    if(isTRUE(verbose)){message("TSV calc for cluster group ",cl," complete")}
+  }
+  TSVtot <- unlist(TSV_list)
+  return(TSVtot)
+}
+
+calcclust <- Cluster_SV(PH_GDAS1_100m_120hr_2010)
+
+
+cluster_res1 <- openair::trajCluster(traj = PH_GDAS1_100m_120hr_2010,
+                                    n.cluster = 2,
+                                    plot = TRUE, showplot = FALSE)
+
+cluster_res <- clust_it
+output = 'CSV'
+cluster_sp = NULL
+verbose = T
+
+
+GDAS1_2TSV <- cluster_TSV(cluster_res1)
+
+
+TSV_curve <- function(traj,
+                      n_clusters = seq(1,10,1),
+                      verbose = T,
+                      plot = FALSE){
+  TSVlist <- vector('list', length = length(n_clusters))
+  for(c in seq_along(clustlist)){
+    if(isTRUE(verbose)){message("Calculating cluster n = ",c," for ",n_clusters[c]," clusters")}
+    clust_it <- openair::trajCluster(traj = traj,
+                                           n.cluster = n_clusters[c],
+                                           plot = TRUE, showplot = FALSE)
+    TSVlist[[c]] <- cluster_TSV(clust_it)
+  }
+  TSVframe <- data.frame(
+    c(n_clusters),
+    unlist(TSVlist)
+  )
+  return(TSVframe)
+}
+
+TSVsample <- TSV_curve(traj = PH_GDAS1_100m_120hr_2010)
+
+plot(TSVsample)
+
+endpt_it <- clus1_pts %>%
+  dplyr::filter(trajectory == j) %>%
+  mutate(clusmeanpt_lat = clus1_mean$lat) %>%
+  mutate(clusmeanpt_lon = clus1_mean$lon) %>%
+  mutate(SV = spatialrisk::haversine(lat_from = lat,
+                                     lon_from = lon,
+                                     lat_to = clusmeanpt_lat,
+                                     lon_to = clusmeanpt_lon))
+  # mutate(SVlat = calcSV_lat(endpt_lat = lat,clusmeanpt_lat = clusmeanpt_lat)) %>%
+  # mutate(SVlon = calcSV_lon(endpt_lon = lon, clusmeanpt_lon = clusmeanpt_lon)) %>%
+  # mutate(SV = SVlat + SVlon)
+
+library(spatialrisk)
+
+haversine_sets <- function(pts1,pts2){
+
+  pts1 <- matrix(c(endpt_it$lon,endpt_it$lat),
+                 nrow = nrow(endpt_it), ncol = 2)
+  pts2 <- matrix(c(endpt_it$clusmeanpt_lon,endpt_it$clusmeanpt_lat),
+                 nrow = nrow(endpt_it), ncol = 2)
+
+  apply(pts1, 1, function(r){distHaversine()})
+
+}
+
+test <- apply(trajectory,1,fn(pt){
+  distHaversine(p1)
+})
+
+test <- endpt_it %>%
+  nest(data = c(lat,lon))
+
+
+my_points <- matrix(c(77.65465, 91.54323,    # Create longitude/latitude matrix
+                      21.35444, 17.65465),
+                    nrow = 2)
+colnames(my_points) <- c("longitude", "latitude")
+rownames(my_points) <- c("pt_1", "pt_2")
+
+ptdists_SV = function(pts_1, pts_2, method = 'haversine'){
+
+pts_1 <- data.frame(endpt_it$lat,
+                endpt_it$lon)
+pts_2 <- data.frame(endpt_it$clusmeanpt_lat,
+                endpt_it$clusmeanpt_lon)
+
+
+
+
+}
 
 ##### Unpacking the cluster function
 
