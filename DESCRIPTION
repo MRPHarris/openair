@@ -28,7 +28,8 @@ Imports:
     methods,
     stats,
     MASS,
-    utils
+    utils,
+    ggplot2
 Suggests:
     KernSmooth,
     maps,
